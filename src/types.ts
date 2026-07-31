@@ -194,6 +194,12 @@ export interface Torrent {
   importacao: ImportacaoTorrent | null;
 }
 
+export interface EtapaDiagnostico {
+  nome: string;
+  ok: boolean;
+  detalhe: string;
+}
+
 export interface TorrentStatus {
   configurado: boolean;
   conectado: boolean;

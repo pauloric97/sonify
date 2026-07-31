@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  AlertTriangle, CheckCircle2, Download, Loader2, Magnet, Pause, Play, Trash2, Upload,
+  AlertTriangle, CheckCircle2, Download, Loader2, Magnet, Pause, Play, Stethoscope, Trash2,
+  Upload, XCircle,
 } from 'lucide-react';
 import { api, getToken } from '../lib/api';
 import { formatBytes } from '../lib/format';
 import { Empty, ErrorBox, Loading } from '../components/ui';
-import type { Torrent, TorrentStatus } from '../types';
+import type { EtapaDiagnostico, Torrent, TorrentStatus } from '../types';
 
 const ESTADOS: Record<string, string> = {
   downloading: 'baixando',
@@ -31,6 +32,52 @@ function tempo(segundos: number) {
   if (h) return `${h}h ${m}min`;
   if (m) return `${m}min`;
   return `${segundos}s`;
+}
+
+/** Testa a integração etapa por etapa — login, plugins e uma busca de verdade. */
+function Diagnostico() {
+  const [etapas, setEtapas] = useState<EtapaDiagnostico[] | null>(null);
+  const [rodando, setRodando] = useState(false);
+
+  const testar = async () => {
+    setRodando(true);
+    setEtapas(null);
+    try {
+      const r = await api<{ etapas: EtapaDiagnostico[] }>('/torrents/diagnostico');
+      setEtapas(r.etapas);
+    } catch (e) {
+      setEtapas([{ nome: 'Diagnóstico', ok: false, detalhe: (e as Error).message }]);
+    } finally {
+      setRodando(false);
+    }
+  };
+
+  return (
+    <div className="mb-6">
+      <button className="btn-ghost text-[13px]" onClick={testar} disabled={rodando}>
+        {rodando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Stethoscope className="h-4 w-4" />}
+        {rodando ? 'Testando…' : 'Testar conexão com o qBittorrent'}
+      </button>
+
+      {etapas && (
+        <div className="mt-3 flex flex-col gap-1.5 rounded-2xl border border-white/[0.07] p-4">
+          {etapas.map((e) => (
+            <div key={e.nome} className="flex items-start gap-2.5 text-[13px]">
+              {e.ok ? (
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+              ) : (
+                <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
+              )}
+              <div className="min-w-0">
+                <span className="font-medium">{e.nome}</span>
+                <span className="text-ink-400"> — {e.detalhe}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function DownloadsPage() {
@@ -191,6 +238,9 @@ export function DownloadsPage() {
           <ErrorBox message={erro} />
         </div>
       )}
+
+      <Diagnostico />
+
 
       {!torrents.length ? (
         <Empty

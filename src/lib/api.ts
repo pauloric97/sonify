@@ -37,7 +37,15 @@ export async function api<T = any>(path: string, options: Options = {}): Promise
   const isJson = res.headers.get('content-type')?.includes('application/json');
   const data = isJson ? await res.json() : null;
 
-  if (!res.ok) throw new ApiError(data?.error || `Erro ${res.status}`, res.status);
+  if (!res.ok) {
+    // Sem corpo JSON quase sempre significa que quem respondeu foi o proxy, não o app.
+    const motivo =
+      data?.error ||
+      (isJson
+        ? `Erro ${res.status}`
+        : `Erro ${res.status} — resposta veio do proxy, não do Sonify (o servidor pode ter reiniciado ou demorado demais)`);
+    throw new ApiError(motivo, res.status);
+  }
   return data as T;
 }
 

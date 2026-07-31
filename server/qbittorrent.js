@@ -20,12 +20,22 @@ async function login() {
   if (loginEmAndamento) return loginEmAndamento;
 
   loginEmAndamento = (async () => {
-    const res = await fetch(`${base()}/api/v2/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ username: env.qbit.user, password: env.qbit.pass }),
-      signal: AbortSignal.timeout(10_000),
-    });
+    let res;
+    try {
+      res = await fetch(`${base()}/api/v2/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ username: env.qbit.user, password: env.qbit.pass }),
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch (err) {
+      // "fetch failed" sozinho não ajuda ninguém a achar o problema.
+      throw erro(
+        `Não alcancei o qBittorrent em ${base()} (${err.message}). ` +
+          'Confira QBIT_URL, se os dois serviços estão na mesma rede e se a Web UI está escutando em 0.0.0.0.',
+        503,
+      );
+    }
 
     const texto = (await res.text()).trim();
     // Com "bypass para localhost" ligado, o qBittorrent responde Ok. sem cookie.
@@ -66,7 +76,13 @@ async function chamar(caminho, { method = 'GET', body, retry = true } = {}) {
     await login();
     return chamar(caminho, { method, body, retry: false });
   }
-  if (!res.ok) throw erro(`qBittorrent respondeu ${res.status} em ${caminho}`);
+  if (!res.ok) {
+    // O corpo costuma explicar ("Search job was not found", por exemplo).
+    const detalhe = await res.text().catch(() => '');
+    throw erro(
+      `qBittorrent respondeu ${res.status} em ${caminho}${detalhe ? `: ${detalhe.slice(0, 200)}` : ''}`,
+    );
+  }
 
   const tipo = res.headers.get('content-type') || '';
   return tipo.includes('application/json') ? res.json() : (await res.text()).trim();

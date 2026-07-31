@@ -10,6 +10,7 @@ import {
   listarTorrents,
   pararBusca,
   pausarTorrent,
+  pluginsBusca,
   qbitConfigurado,
   removerTorrent,
   resultadosBusca,
@@ -22,6 +23,16 @@ import { ordenarResultados } from '../ranking.js';
 
 export const torrentsRouter = Router();
 const soAdmin = [requireAuth, requireAdmin];
+
+/**
+ * Erro sem mensagem vira '{}' no JSON e o front só consegue dizer "Erro 502".
+ * Aqui garantimos um texto e deixamos o rastro no log do container.
+ */
+function responderErro(res, err) {
+  const mensagem = err?.message || String(err) || 'Erro desconhecido falando com o qBittorrent';
+  console.error('[qbit]', mensagem);
+  res.status(err?.status || 502).json({ error: mensagem });
+}
 
 /** Estado da conexão — a tela mostra isso quando não está configurado. */
 torrentsRouter.get('/status', soAdmin, async (req, res) => {
@@ -42,6 +53,60 @@ torrentsRouter.get('/status', soAdmin, async (req, res) => {
   }
 });
 
+/**
+ * Percorre cada etapa da integração e diz onde quebra. Existe porque "Erro 502"
+ * na tela não conta nada — aqui dá pra ver se parou no login, no plugin ou na busca.
+ */
+torrentsRouter.get('/diagnostico', soAdmin, async (req, res) => {
+  const etapas = [];
+  const passo = async (nome, fn) => {
+    try {
+      const detalhe = await fn();
+      etapas.push({ nome, ok: true, detalhe: String(detalhe ?? 'ok') });
+      return true;
+    } catch (err) {
+      etapas.push({ nome, ok: false, detalhe: err?.message || String(err) });
+      return false;
+    }
+  };
+
+  etapas.push({
+    nome: 'Configuração',
+    ok: qbitConfigurado(),
+    detalhe: qbitConfigurado()
+      ? `${env.qbit.url} • usuário "${env.qbit.user || '(vazio)'}" • categoria "${env.qbit.category}"`
+      : 'QBIT_URL não definido',
+  });
+
+  if (qbitConfigurado()) {
+    const conectou = await passo('Conexão e login', async () => `qBittorrent ${await versao()}`);
+
+    if (conectou) {
+      let temPlugin = false;
+      await passo('Plugins de busca', async () => {
+        const plugins = await pluginsBusca();
+        const ativos = plugins.filter((p) => p.ativo);
+        temPlugin = ativos.length > 0;
+        if (!plugins.length) throw new Error('nenhum plugin instalado (Exibir → Motor de busca)');
+        if (!ativos.length) throw new Error(`${plugins.length} instalado(s), nenhum ativo`);
+        return `${ativos.length} ativo(s): ${ativos.map((p) => p.nome).join(', ')}`;
+      });
+
+      if (temPlugin) {
+        await passo('Busca de teste', async () => {
+          const id = await iniciarBusca('ubuntu');
+          await new Promise((r) => setTimeout(r, 3000));
+          const r = await resultadosBusca(id, 5);
+          await pararBusca(id);
+          return `status "${r.status}", ${r.total} resultado(s)`;
+        });
+      }
+    }
+  }
+
+  res.json({ etapas });
+});
+
 torrentsRouter.get('/', soAdmin, async (req, res) => {
   if (!qbitConfigurado()) return res.json({ torrents: [], importacoes: [] });
   try {
@@ -53,7 +118,7 @@ torrentsRouter.get('/', soAdmin, async (req, res) => {
       importacoes,
     });
   } catch (err) {
-    res.status(err.status || 502).json({ error: err.message });
+    responderErro(res, err);
   }
 });
 
@@ -66,7 +131,7 @@ torrentsRouter.post('/', soAdmin, async (req, res) => {
     await adicionarTorrent({ magnet });
     res.json({ ok: true });
   } catch (err) {
-    res.status(err.status || 502).json({ error: err.message });
+    responderErro(res, err);
   }
 });
 
@@ -81,7 +146,7 @@ torrentsRouter.post(
       await adicionarTorrent({ torrent: req.body, filename: String(req.query.nome || 'arquivo.torrent') });
       res.json({ ok: true });
     } catch (err) {
-      res.status(err.status || 502).json({ error: err.message });
+      responderErro(res, err);
     }
   },
 );
@@ -95,7 +160,7 @@ torrentsRouter.post('/buscar', soAdmin, async (req, res) => {
   try {
     res.json({ id: await iniciarBusca(termo) });
   } catch (err) {
-    res.status(err.status || 502).json({ error: err.message });
+    responderErro(res, err);
   }
 });
 
@@ -110,12 +175,13 @@ torrentsRouter.get('/buscar/:id', soAdmin, async (req, res) => {
     });
     res.json({ ...r, itens, ocultos: r.itens.length - itens.length });
   } catch (err) {
-    res.status(err.status || 502).json({ error: err.message });
+    responderErro(res, err);
   }
 });
 
 torrentsRouter.delete('/buscar/:id', soAdmin, async (req, res) => {
-  await pararBusca(Number(req.params.id));
+  // Encerrar a busca é melhor esforço: se falhar, o qBittorrent expira sozinho.
+  await pararBusca(Number(req.params.id)).catch(() => {});
   res.json({ ok: true });
 });
 
@@ -128,7 +194,7 @@ torrentsRouter.post('/da-busca', soAdmin, async (req, res) => {
     await adicionarPorUrl(url);
     res.json({ ok: true });
   } catch (err) {
-    res.status(err.status || 502).json({ error: err.message });
+    responderErro(res, err);
   }
 });
 
@@ -137,7 +203,7 @@ torrentsRouter.post('/:hash/pausar', soAdmin, async (req, res) => {
     await pausarTorrent(req.params.hash);
     res.json({ ok: true });
   } catch (err) {
-    res.status(err.status || 502).json({ error: err.message });
+    responderErro(res, err);
   }
 });
 
@@ -146,7 +212,7 @@ torrentsRouter.post('/:hash/retomar', soAdmin, async (req, res) => {
     await retomarTorrent(req.params.hash);
     res.json({ ok: true });
   } catch (err) {
-    res.status(err.status || 502).json({ error: err.message });
+    responderErro(res, err);
   }
 });
 
@@ -157,7 +223,7 @@ torrentsRouter.post('/:hash/importar', soAdmin, async (req, res) => {
     await verificarUmaVez({ forcarHash: req.params.hash });
     res.json({ importacao: one('SELECT * FROM torrents WHERE hash = :hash', { hash: req.params.hash }) });
   } catch (err) {
-    res.status(err.status || 502).json({ error: err.message });
+    responderErro(res, err);
   }
 });
 
@@ -167,6 +233,6 @@ torrentsRouter.delete('/:hash', soAdmin, async (req, res) => {
     run('DELETE FROM torrents WHERE hash = :hash', { hash: req.params.hash });
     res.json({ ok: true });
   } catch (err) {
-    res.status(err.status || 502).json({ error: err.message });
+    responderErro(res, err);
   }
 });
