@@ -16,7 +16,13 @@ function erro(msg, status = 502) {
   return Object.assign(new Error(msg), { status });
 }
 
-async function login() {
+/**
+ * Reaproveita a sessão. Isso não é otimização: o qBittorrent guarda os jobs de
+ * busca *dentro da sessão*, então relogar entre o search/start e o search/results
+ * faz o job "sumir" com 404. Só refaz o login quando o servidor recusa o SID (403).
+ */
+async function login(forcar = false) {
+  if (sid && !forcar) return sid;
   if (loginEmAndamento) return loginEmAndamento;
 
   loginEmAndamento = (async () => {
@@ -72,8 +78,9 @@ async function chamar(caminho, { method = 'GET', body, retry = true } = {}) {
   }
 
   if (res.status === 403 && retry) {
+    // Sessão expirou do lado do qBittorrent: pega uma nova e repete uma vez.
     sid = null;
-    await login();
+    await login(true);
     return chamar(caminho, { method, body, retry: false });
   }
   if (!res.ok) {
