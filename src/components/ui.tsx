@@ -1,5 +1,5 @@
-import { useEffect, type ReactNode } from 'react';
-import { Loader2, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { ChevronLeft, ChevronRight, Loader2, X } from 'lucide-react';
 
 export function Loading({ label = 'Carregando…' }: { label?: string }) {
   return (
@@ -93,11 +93,74 @@ export function SectionTitle({ children, action }: { children: ReactNode; action
   );
 }
 
-/** Carrossel horizontal com scroll-snap (bom no touch). */
+/**
+ * Carrossel horizontal. No touch rola com o dedo; no desktop ganha setas, que
+ * só aparecem quando há mesmo conteúdo pra aquele lado.
+ */
 export function Row({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [podeRolar, setPodeRolar] = useState({ esquerda: false, direita: false });
+
+  const medir = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    setPodeRolar({
+      esquerda: el.scrollLeft > 8,
+      direita: el.scrollLeft + el.clientWidth < el.scrollWidth - 8,
+    });
+  }, []);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    medir();
+    el.addEventListener('scroll', medir, { passive: true });
+    window.addEventListener('resize', medir);
+    // As capas chegam depois e mudam a largura total.
+    const obs = new ResizeObserver(medir);
+    obs.observe(el);
+    return () => {
+      el.removeEventListener('scroll', medir);
+      window.removeEventListener('resize', medir);
+      obs.disconnect();
+    };
+  }, [medir, children]);
+
+  const rolar = (direcao: 1 | -1) =>
+    ref.current?.scrollBy({ left: direcao * ref.current.clientWidth * 0.85, behavior: 'smooth' });
+
+  const seta =
+    'absolute top-[38%] z-10 hidden h-10 w-10 -translate-y-1/2 place-items-center rounded-full ' +
+    'border border-white/10 bg-ink-900/90 text-white shadow-xl backdrop-blur transition ' +
+    'hover:bg-ink-800 active:scale-90 md:grid';
+
   return (
-    <div className="no-scrollbar -mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">
-      {children}
+    <div className="group/row relative">
+      <div
+        ref={ref}
+        className="no-scrollbar -mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0"
+      >
+        {children}
+      </div>
+
+      {podeRolar.esquerda && (
+        <button
+          onClick={() => rolar(-1)}
+          aria-label="Ver anteriores"
+          className={`${seta} -left-3 opacity-0 group-hover/row:opacity-100 focus:opacity-100`}
+        >
+          <ChevronLeft className="h-5 w-5" />
+        </button>
+      )}
+      {podeRolar.direita && (
+        <button
+          onClick={() => rolar(1)}
+          aria-label="Ver próximos"
+          className={`${seta} -right-3 opacity-0 group-hover/row:opacity-100 focus:opacity-100`}
+        >
+          <ChevronRight className="h-5 w-5" />
+        </button>
+      )}
     </div>
   );
 }

@@ -113,6 +113,8 @@ export interface ItemCatalogo {
   sinopse?: string | null;
   /** Termo pronto pra jogar na busca de torrent. */
   busca: string;
+  /** Título traduzido, quando difere do original (filme/série). */
+  buscaAlt?: string | null;
 }
 
 export interface SecaoCatalogo {

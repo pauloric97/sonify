@@ -159,6 +159,7 @@ function DetalheItem({ item, onFechar }: { item: ItemCatalogo | null; onFechar: 
   const [erro, setErro] = useState<string | null>(null);
   const [adicionado, setAdicionado] = useState<string | null>(null);
   const [ocultos, setOcultos] = useState(0);
+  const [termo, setTermo] = useState('');
   // Em ref também: o intervalo de polling é criado uma vez e precisa ler o valor atual.
   const todosRef = useRef(false);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -191,6 +192,8 @@ function DetalheItem({ item, onFechar }: { item: ItemCatalogo | null; onFechar: 
       setProcurando(false);
       setOcultos(0);
       todosRef.current = false;
+    } else {
+      setTermo(item.busca);
     }
   }, [item, encerrar]);
 
@@ -198,7 +201,10 @@ function DetalheItem({ item, onFechar }: { item: ItemCatalogo | null; onFechar: 
 
   if (!item) return null;
 
-  const procurar = async () => {
+  const procurar = async (usar?: string) => {
+    const alvo = (usar ?? termo).trim();
+    if (!alvo) return;
+    if (usar) setTermo(usar);
     setProcurando(true);
     setErro(null);
     setResultados([]);
@@ -206,7 +212,7 @@ function DetalheItem({ item, onFechar }: { item: ItemCatalogo | null; onFechar: 
     try {
       const { id } = await api<{ id: number }>('/torrents/buscar', {
         method: 'POST',
-        body: { termo: item.busca },
+        body: { termo: alvo },
       });
       idRef.current = id;
       setBuscaId(id);
@@ -299,10 +305,32 @@ function DetalheItem({ item, onFechar }: { item: ItemCatalogo | null; onFechar: 
         </p>
       ) : (
         <>
-          {!buscaId && (
-            <button className="btn-primary w-full" onClick={procurar} disabled={procurando}>
+          <div className="mb-3 flex gap-2">
+            <input
+              className="field"
+              value={termo}
+              onChange={(e) => setTermo(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && procurar()}
+              placeholder="termo da busca no qBittorrent"
+              aria-label="Termo da busca"
+            />
+            <button
+              className="btn-primary shrink-0"
+              onClick={() => procurar()}
+              disabled={procurando || !termo.trim()}
+            >
               {procurando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-              Procurar no qBittorrent
+              Procurar
+            </button>
+          </div>
+
+          {/* Release costuma usar o título original; o traduzido fica a um clique. */}
+          {item.buscaAlt && item.buscaAlt !== termo && (
+            <button
+              onClick={() => procurar(item.buscaAlt!)}
+              className="mb-3 rounded-full bg-white/[0.07] px-3 py-1.5 text-xs text-ink-300 transition hover:bg-white/[0.12] hover:text-white"
+            >
+              tentar “{item.buscaAlt}”
             </button>
           )}
 
@@ -317,8 +345,8 @@ function DetalheItem({ item, onFechar }: { item: ItemCatalogo | null; onFechar: 
               <p className="mb-2 flex items-center gap-2 text-xs text-ink-400">
                 {procurando && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                 {procurando
-                  ? `procurando por “${item.busca}”…`
-                  : `${resultados.length} resultado(s) para “${item.busca}”`}
+                  ? `procurando por “${termo}”…`
+                  : `${resultados.length} resultado(s) para “${termo}”`}
               </p>
 
               <div className="flex flex-col gap-1">

@@ -17,10 +17,16 @@ const NAV = [
   { to: '/videos', label: 'Vídeos', icon: Clapperboard },
 ];
 
-// No celular o Explorar entra pela tela de Buscar (a barra de abas já tem 5 itens).
 const NAV_EXTRA = [
   { to: '/explorar', label: 'Explorar', icon: Compass },
   { to: '/favoritos', label: 'Favoritos', icon: Heart },
+];
+
+// A barra do celular leva o Explorar junto; o Perfil entra como sexto item.
+const NAV_MOBILE = [
+  ...NAV.slice(0, 2),
+  { to: '/explorar', label: 'Explorar', icon: Compass, end: undefined },
+  ...NAV.slice(2),
 ];
 
 function Logo() {
@@ -188,14 +194,14 @@ export function AppShell() {
       {/* ------------------------------- tabs (celular) */}
       {!expanded && (
         <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-white/[0.07] bg-ink-950/95 pb-safe backdrop-blur-xl md:hidden">
-          <div className="grid grid-cols-5">
-            {NAV.map(({ to, label, icon: Icon, end }) => (
+          <div className="grid grid-cols-6">
+            {NAV_MOBILE.map(({ to, label, icon: Icon, end }) => (
               <NavLink
                 key={to}
                 to={to}
                 end={end}
                 className={({ isActive }) =>
-                  `flex flex-col items-center gap-1 py-2.5 text-[10px] font-medium transition ${
+                  `flex flex-col items-center gap-1 py-2.5 text-[9.5px] font-medium transition ${
                     isActive ? 'text-white' : 'text-ink-500'
                   }`
                 }

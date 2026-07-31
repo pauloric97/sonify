@@ -30,6 +30,34 @@ async function juntar(tarefas) {
     .filter((s) => s.itens.length || s.erro);
 }
 
+/**
+ * Nome de release de torrent não tem "(Radio Edit - feat. Fulano)". Encurta o
+ * termo pro miolo que costuma aparecer no nome do arquivo.
+ */
+const soPalavras = (t) =>
+  String(t || '')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(/[^\p{L}\p{N}\s&']/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+/**
+ * Música ainda perde o sufixo depois de " - " e tudo a partir de "feat".
+ * Os parênteses saem primeiro: em "Get Lucky (Radio Edit - feat. X)" o hífen
+ * mora dentro deles, e cortar por ele antes deixaria "Get Lucky Radio Edit".
+ */
+const limparMusica = (t) =>
+  soPalavras(
+    String(t || '')
+      .replace(/\([^)]*\)/g, ' ')
+      .replace(/\[[^\]]*\]/g, ' ')
+      .replace(/\s[-–]\s.*$/, '')
+      .replace(/\b(feat|ft|featuring)\b\.?.*$/i, ''),
+  );
+
+const termo = (...partes) => partes.filter(Boolean).join(' ').slice(0, 70);
+
 /* --------------------------------------------------------------- música */
 
 const albumDeezer = (a) => ({
@@ -39,7 +67,7 @@ const albumDeezer = (a) => ({
   subtitulo: a.artist?.name || '',
   capa: a.cover_big || a.cover_medium || null,
   ano: a.release_date ? Number(String(a.release_date).slice(0, 4)) : null,
-  busca: [a.artist?.name, a.title].filter(Boolean).join(' '),
+  busca: termo(a.artist?.name, limparMusica(a.title)),
 });
 
 const faixaDeezer = (t) => ({
@@ -49,7 +77,7 @@ const faixaDeezer = (t) => ({
   subtitulo: t.artist?.name || '',
   capa: t.album?.cover_big || t.album?.cover_medium || null,
   ano: null,
-  busca: [t.artist?.name, t.title].filter(Boolean).join(' '),
+  busca: termo(t.artist?.name, limparMusica(t.title)),
 });
 
 async function deezerAlbuns(genero = 0, limite = 20) {
@@ -73,7 +101,7 @@ async function appleAlbuns(limite = 20) {
     // A arte vem em 170px; a URL aceita tamanho maior.
     capa: (e['im:image']?.at(-1)?.label || '').replace(/\/\d+x\d+bb\./, '/512x512bb.'),
     ano: e['im:releaseDate']?.label ? Number(e['im:releaseDate'].label.slice(0, 4)) : null,
-    busca: `${e['im:artist'].label} ${e['im:name'].label}`,
+    busca: termo(e['im:artist'].label, limparMusica(e['im:name'].label)),
   }));
 }
 
@@ -90,18 +118,26 @@ function filmeTmdb(f) {
   const ano = (f.release_date || f.first_air_date || '').slice(0, 4);
   const ehSerie = Boolean(f.first_air_date || f.name);
   const titulo = f.title || f.name;
+  // Release de torrent quase sempre usa o título ORIGINAL: "Men in Black", não
+  // "MIB - Homens de Preto". O título traduzido vira alternativa no menu.
+  const original = f.original_title || f.original_name || titulo;
+
+  const paraBusca = (t) => termo(soPalavras(t), ehSerie ? null : ano);
+  const principal = paraBusca(original);
+  const alternativo = paraBusca(titulo);
+
   return {
     tipo: ehSerie ? 'serie' : 'filme',
     id: `tmdb-${ehSerie ? 'tv' : 'movie'}-${f.id}`,
     titulo,
-    subtitulo: [ano, f.original_title !== titulo ? f.original_title : null].filter(Boolean).join(' • '),
+    subtitulo: [ano, original !== titulo ? original : null].filter(Boolean).join(' • '),
     capa: IMG(f.poster_path),
     backdrop: IMG(f.backdrop_path, 'w780'),
     ano: ano ? Number(ano) : null,
     nota: f.vote_average ? Math.round(f.vote_average * 10) / 10 : null,
     sinopse: f.overview || null,
-    // Filme rende busca melhor com o ano junto; série, não.
-    busca: ehSerie ? titulo : [titulo, ano].filter(Boolean).join(' '),
+    busca: principal,
+    buscaAlt: alternativo !== principal ? alternativo : null,
   };
 }
 
@@ -134,8 +170,8 @@ export async function destaques() {
   return { musica, video, tmdbConfigurado: Boolean(env.tmdbKey) };
 }
 
-export async function buscarNoCatalogo(termo) {
-  const q = String(termo || '').trim();
+export async function buscarNoCatalogo(consulta) {
+  const q = String(consulta || '').trim();
   if (!q) return { musica: [], video: [] };
 
   const [musica, video] = await Promise.allSettled([
