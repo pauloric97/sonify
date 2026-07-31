@@ -1,9 +1,15 @@
 import { Router } from 'express';
 import { requireAdmin, requireAuth } from '../auth.js';
 import { PADROES, preferenciasBusca, salvarConfig } from '../config.js';
+import { armazenamento } from '../armazenamento.js';
 
 export const configRouter = Router();
 configRouter.use(requireAuth, requireAdmin);
+
+/** Diz se os dados sobrevivem ao próximo deploy. */
+configRouter.get('/armazenamento', (req, res) => {
+  res.json(armazenamento());
+});
 
 configRouter.get('/busca', (req, res) => {
   res.json({ ...preferenciasBusca(), padroes: PADROES });

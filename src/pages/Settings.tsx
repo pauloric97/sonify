@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { ArrowDown, ArrowUp, LogOut, Plus, RefreshCw, Trash2, UserPlus, X } from 'lucide-react';
+import {
+  AlertTriangle, ArrowDown, ArrowUp, HardDrive, LogOut, Plus, RefreshCw, Trash2, UserPlus, X,
+} from 'lucide-react';
 import { api } from '../lib/api';
 import { useApi } from '../lib/useApi';
 import { useAuth } from '../lib/auth';
 import { UploadPanel } from '../components/UploadPanel';
 import { ErrorBox, Loading, Sheet } from '../components/ui';
-import type { PreferenciasBusca, ScanJob, User } from '../types';
+import { formatBytes } from '../lib/format';
+import type { Armazenamento, PreferenciasBusca, ScanJob, User } from '../types';
 
 const ACCENTS = ['#7c5cff', '#e84ab2', '#22c55e', '#f59e0b', '#38bdf8', '#ef4444'];
 
@@ -214,6 +217,8 @@ function BibliotecaTab() {
 
   return (
     <div className="flex flex-col gap-5">
+      <CardArmazenamento />
+
       <div className="rounded-2xl border border-white/[0.07] p-5">
         <p className="font-semibold">Importar do bucket</p>
         <p className="mt-1 text-sm text-ink-400">
@@ -262,6 +267,63 @@ function BibliotecaTab() {
       </div>
 
       {error && <ErrorBox message={error} />}
+    </div>
+  );
+}
+
+/** Mostra onde os dados moram e se eles sobrevivem ao próximo deploy. */
+function CardArmazenamento() {
+  const { data } = useApi<Armazenamento>('/config/armazenamento');
+  if (!data) return null;
+
+  const seguro = data.persistente;
+
+  return (
+    <div
+      className={`rounded-2xl border p-5 ${
+        seguro ? 'border-white/[0.07]' : 'border-amber-500/40 bg-amber-500/[0.07]'
+      }`}
+    >
+      <div className="flex items-start gap-3">
+        {seguro ? (
+          <HardDrive className="mt-0.5 h-5 w-5 shrink-0 text-emerald-400" />
+        ) : (
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold">
+            {seguro ? 'Seus dados estão a salvo' : 'Seus dados somem no próximo deploy'}
+          </p>
+          <p className="mt-1 text-sm text-ink-400">
+            {seguro
+              ? data.montagem
+                ? `Volume montado em ${data.montagem} — sobrevive a reinício e a novo deploy.`
+                : 'Rodando fora de container: os arquivos ficam no disco normalmente.'
+              : 'Não há volume montado no diretório de dados. Como o disco do container é descartável, contas, playlists e histórico se perdem a cada implantação. Monte um volume em ' +
+                data.dataDir +
+                '.'}
+          </p>
+
+          <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-[13px] sm:grid-cols-4">
+            {[
+              ['Perfis', data.contagens.usuarios],
+              ['Na biblioteca', data.contagens.midias],
+              ['Playlists', data.contagens.playlists],
+              ['Reproduções', data.contagens.reproducoes],
+            ].map(([rotulo, valor]) => (
+              <div key={rotulo as string}>
+                <dt className="text-ink-500">{rotulo}</dt>
+                <dd className="font-medium tabular-nums">{valor as number}</dd>
+              </div>
+            ))}
+          </dl>
+
+          <p className="mt-3 text-xs text-ink-500">
+            {data.dataDir} • banco {formatBytes(data.bancoBytes)} • {data.capas.quantidade} capas (
+            {formatBytes(data.capas.bytes)})
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

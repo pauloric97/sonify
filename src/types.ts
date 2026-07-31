@@ -135,6 +135,18 @@ export interface BuscaCatalogo {
   tmdbConfigurado: boolean;
 }
 
+export interface Armazenamento {
+  dataDir: string;
+  banco: string;
+  bancoBytes: number;
+  capas: { quantidade: number; bytes: number };
+  emContainer: boolean;
+  persistente: boolean;
+  montagem: string | null;
+  motivo: string | null;
+  contagens: { usuarios: number; midias: number; playlists: number; reproducoes: number };
+}
+
 export interface PreferenciasBusca {
   termosPreferidos: string[];
   termosBloqueados: string[];
