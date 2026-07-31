@@ -1,0 +1,172 @@
+import { Router } from 'express';
+import express from 'express';
+import { all, one, run } from '../db.js';
+import { requireAdmin, requireAuth } from '../auth.js';
+import { env } from '../env.js';
+import {
+  adicionarPorUrl,
+  adicionarTorrent,
+  iniciarBusca,
+  listarTorrents,
+  pararBusca,
+  pausarTorrent,
+  qbitConfigurado,
+  removerTorrent,
+  resultadosBusca,
+  retomarTorrent,
+  versao,
+} from '../qbittorrent.js';
+import { verificarUmaVez } from '../torrent-worker.js';
+import { preferenciasBusca } from '../config.js';
+import { ordenarResultados } from '../ranking.js';
+
+export const torrentsRouter = Router();
+const soAdmin = [requireAuth, requireAdmin];
+
+/** Estado da conexão — a tela mostra isso quando não está configurado. */
+torrentsRouter.get('/status', soAdmin, async (req, res) => {
+  if (!qbitConfigurado())
+    return res.json({ configurado: false, conectado: false, erro: 'QBIT_URL não definido no .env' });
+
+  try {
+    res.json({
+      configurado: true,
+      conectado: true,
+      versao: await versao(),
+      categoria: env.qbit.category,
+      autoImport: env.qbit.autoImport,
+      apagarDepois: env.qbit.deleteAfter,
+    });
+  } catch (err) {
+    res.json({ configurado: true, conectado: false, erro: err.message });
+  }
+});
+
+torrentsRouter.get('/', soAdmin, async (req, res) => {
+  if (!qbitConfigurado()) return res.json({ torrents: [], importacoes: [] });
+  try {
+    const torrents = await listarTorrents();
+    const importacoes = all('SELECT * FROM torrents ORDER BY criado_em DESC LIMIT 50');
+    const porHash = new Map(importacoes.map((i) => [i.hash, i]));
+    res.json({
+      torrents: torrents.map((t) => ({ ...t, importacao: porHash.get(t.hash) || null })),
+      importacoes,
+    });
+  } catch (err) {
+    res.status(err.status || 502).json({ error: err.message });
+  }
+});
+
+torrentsRouter.post('/', soAdmin, async (req, res) => {
+  const magnet = String(req.body?.magnet || '').trim();
+  if (!magnet) return res.status(400).json({ error: 'Cole um magnet link' });
+  if (!/^magnet:\?/i.test(magnet)) return res.status(400).json({ error: 'Isso não parece um magnet link' });
+
+  try {
+    await adicionarTorrent({ magnet });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(err.status || 502).json({ error: err.message });
+  }
+});
+
+/** Upload de .torrent: o corpo vem cru mesmo, é binário. */
+torrentsRouter.post(
+  '/arquivo',
+  soAdmin,
+  express.raw({ type: 'application/x-bittorrent', limit: '10mb' }),
+  async (req, res) => {
+    if (!req.body?.length) return res.status(400).json({ error: 'Arquivo .torrent vazio' });
+    try {
+      await adicionarTorrent({ torrent: req.body, filename: String(req.query.nome || 'arquivo.torrent') });
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(err.status || 502).json({ error: err.message });
+    }
+  },
+);
+
+/* ---------------------------------------------------------------- busca */
+
+/** Dispara a busca nos plugins do qBittorrent e devolve o id pra ir puxando os resultados. */
+torrentsRouter.post('/buscar', soAdmin, async (req, res) => {
+  const termo = String(req.body?.termo || '').trim();
+  if (!termo) return res.status(400).json({ error: 'Diga o que procurar' });
+  try {
+    res.json({ id: await iniciarBusca(termo) });
+  } catch (err) {
+    res.status(err.status || 502).json({ error: err.message });
+  }
+});
+
+torrentsRouter.get('/buscar/:id', soAdmin, async (req, res) => {
+  try {
+    const r = await resultadosBusca(Number(req.params.id));
+    const prefs = preferenciasBusca();
+    // `?todos=1` ignora o filtro de "só preferidos" sem mexer na configuração.
+    const itens = ordenarResultados(r.itens, {
+      ...prefs,
+      somentePreferidos: req.query.todos === '1' ? false : prefs.somentePreferidos,
+    });
+    res.json({ ...r, itens, ocultos: r.itens.length - itens.length });
+  } catch (err) {
+    res.status(err.status || 502).json({ error: err.message });
+  }
+});
+
+torrentsRouter.delete('/buscar/:id', soAdmin, async (req, res) => {
+  await pararBusca(Number(req.params.id));
+  res.json({ ok: true });
+});
+
+/** Baixa um resultado da busca (magnet ou link de .torrent). */
+torrentsRouter.post('/da-busca', soAdmin, async (req, res) => {
+  const url = String(req.body?.url || '').trim();
+  if (!/^(magnet:\?|https?:\/\/)/i.test(url))
+    return res.status(400).json({ error: 'Link inválido' });
+  try {
+    await adicionarPorUrl(url);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(err.status || 502).json({ error: err.message });
+  }
+});
+
+torrentsRouter.post('/:hash/pausar', soAdmin, async (req, res) => {
+  try {
+    await pausarTorrent(req.params.hash);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(err.status || 502).json({ error: err.message });
+  }
+});
+
+torrentsRouter.post('/:hash/retomar', soAdmin, async (req, res) => {
+  try {
+    await retomarTorrent(req.params.hash);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(err.status || 502).json({ error: err.message });
+  }
+});
+
+/** Força a importação agora (ou tenta de novo, se deu erro antes). */
+torrentsRouter.post('/:hash/importar', soAdmin, async (req, res) => {
+  try {
+    run('DELETE FROM torrents WHERE hash = :hash', { hash: req.params.hash });
+    await verificarUmaVez({ forcarHash: req.params.hash });
+    res.json({ importacao: one('SELECT * FROM torrents WHERE hash = :hash', { hash: req.params.hash }) });
+  } catch (err) {
+    res.status(err.status || 502).json({ error: err.message });
+  }
+});
+
+torrentsRouter.delete('/:hash', soAdmin, async (req, res) => {
+  try {
+    await removerTorrent(req.params.hash, req.query.arquivos !== '0');
+    run('DELETE FROM torrents WHERE hash = :hash', { hash: req.params.hash });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(err.status || 502).json({ error: err.message });
+  }
+});
